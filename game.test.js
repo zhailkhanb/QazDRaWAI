@@ -1,0 +1,5 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {schedule,award,resultsCSV} from './game.js';
+test('every player receives the same set and order without repeats',()=>{for(let n=1;n<=4;n++){const tasks=schedule(n,6,16,()=>.4);assert.equal(tasks.length,n*6);const own=tasks.filter((_,i)=>i%n===0);assert.equal(new Set(own).size,6);for(let p=1;p<n;p++)assert.deepEqual(tasks.filter((_,i)=>i%n===p),own)}});
+test('normalized scoring is independent of selected duration',()=>{assert.equal(award(true,10,20),150);assert.equal(award(true,5,10),150);assert.equal(award(false,20,20),0);assert.equal(award(true,-1,20),100);assert.equal(award(true,100,20),200)});
+test('CSV preserves Kazakh and protects formula-like player names',()=>{const csv=resultsCSV([{name:'=HYPERLINK("bad")',label:'Күн',won:true,points:140,seconds:12}]);assert.ok(csv.startsWith('\ufeff'));assert.ok(csv.includes('Күн'));assert.ok(csv.includes("\"'=HYPERLINK"));assert.ok(csv.includes('""bad""'))});
+test('invalid schedule fails immediately',()=>{assert.throws(()=>schedule(5,6,16));assert.throws(()=>schedule(2,17,16))});

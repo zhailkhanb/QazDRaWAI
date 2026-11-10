@@ -1,7 +1,12 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {Network,template,LABELS,features} from './model.js';
-function seeded(seed){return ()=>((seed=(Math.imul(1664525,seed)+1013904223)>>>0)/4294967296)}
-const net=new Network(seeded(41));
-test('blank drawings produce no predictions',()=>{assert.deepEqual(net.predict([]),[]);assert.equal(features([[[.5,.5],[.5,.5]]]),null)});
-test('recognizes held-out synthetic drawings in every supported class',()=>{for(let c=0;c<LABELS.length;c++)for(let i=0;i<5;i++)assert.equal(net.predict(template(c,seeded(700+c*10+i)))[0].label,c)});
-test('normalization preserves translated and scaled drawings',()=>{let s=template(3,seeded(123));let moved=s.map(a=>a.map(([x,y])=>[x*.4+.2,y*.4+.3]));assert.equal(net.predict(moved)[0].label,3)});
-test('prediction scores are finite and sum to one',()=>{let r=net.predict(template(0,seeded(9)));assert.ok(r.every(x=>Number.isFinite(x.score)));assert.ok(Math.abs(r.reduce((a,b)=>a+b.score,0)-1)<1e-6)});
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {DoodleCNN,conv,pool,dense,softmax,rasterize,rankOutput,KEYS,canonical} from './model.js';
+import {CLASSES} from './classes.js';
+test('model labels contain every game target; aliases match cups',()=>{assert.equal(CLASSES.length,345);for(const key of KEYS)assert.ok(CLASSES.includes(key),key);assert.equal(canonical('coffee_cup'),'mug')});
+test('blank, tiny and malformed strokes are never sent to inference',()=>{for(const s of [[],[[[.5,.5],[.5,.5]]],[[[NaN,0],[1,1]]],[[[-1,0],[1,1]]],null])assert.equal(rasterize(s),null)});
+test('preprocessing produces nonempty normalized white ink, and centers scaled drawings',()=>{const a=[[[.1,.2],[.8,.2],[.8,.9],[.1,.9],[.1,.2]]],b=a.map(s=>s.map(([x,y])=>[x*.4+.2,y*.4+.1]));const x=rasterize(a),y=rasterize(b);assert.equal(x.length,784);assert.ok(x.some(v=>v>0));assert.ok(x.every(v=>v>=0&&v<=1));assert.ok(x.reduce((sum,v,i)=>sum+Math.abs(v-y[i]),0)<1)});
+test('convolution applies SAME zero-padding, HWIO kernels and ReLU',()=>{assert.deepEqual([...conv(new Float32Array(9).fill(1),3,1,1,new Float32Array(9).fill(1),new Float32Array(1))],[4,6,4,6,9,6,4,6,4]);assert.ok(conv(new Float32Array(9).fill(1),3,1,1,new Float32Array(9).fill(-1),new Float32Array(1)).every(v=>v===0))});
+test('multi-channel convolution retains correct kernel channel ordering',()=>{const input=Float32Array.from([1,2]),kernel=new Float32Array(36);kernel.set([2,3,5,7],16);assert.deepEqual([...conv(input,1,2,2,kernel,Float32Array.from([1,2]))],[13,19])});
+test('max pooling uses valid 2x2 strides and channels-last order',()=>{assert.deepEqual([...pool(Float32Array.from({length:9},(_,i)=>i),3,1)],[4]);assert.deepEqual([...pool(Float32Array.from([1,8,2,7,3,6,4,5]),2,2)],[4,8])});
+test('dense and numerically stable softmax',()=>{assert.deepEqual([...dense(Float32Array.from([2,3]),2,Float32Array.from([1,2,3,4]),Float32Array.from([1,2]))],[12,18]);const p=softmax([10000,10000]);assert.deepEqual([...p],[.5,.5])});
+test('full six-convolution model parses correct weight layout and returns 345 outputs',()=>{const model=new DoodleCNN(new ArrayBuffer(2176804)),p=model.predict(new Float32Array(784));assert.equal(p.length,345);assert.ok(p.every(v=>Math.abs(v-1/345)<1e-7));assert.throws(()=>new DoodleCNN(new ArrayBuffer(100)))});
+test('ranking considers all 345 categories, not just the target list',()=>{const values=CLASSES.map(k=>k==='cat'?.7:k==='sun'?.2:0);const r=rankOutput(values,CLASSES);assert.equal(r[0].key,'cat');assert.equal(r[0].label,-1);assert.equal(r[1].key,'sun');assert.throws(()=>rankOutput([NaN],['sun']))});
